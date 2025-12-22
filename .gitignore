@@ -1,0 +1,6 @@
+build/
+.waf*
+*.lock
+*.pyc
+.DS_Store
+worker_src/

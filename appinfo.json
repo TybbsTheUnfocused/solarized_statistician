@@ -1,0 +1,19 @@
+{
+  "uuid": "5f60c410-b384-4869-95e5-f50993510c4b",
+  "shortName": "SolarStat",
+  "longName": "Solarized Statistician",
+  "companyName": "Antigravity",
+  "versionLabel": "1.0",
+  "sdkVersion": "4.9.77",
+  "targetPlatforms": [
+    "basalt",
+    "emery"
+  ],
+  "watchapp": {
+    "watchface": true
+  },
+  "appKeys": {},
+  "resources": {
+    "media": []
+  }
+}
