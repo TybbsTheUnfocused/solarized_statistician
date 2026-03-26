@@ -28,7 +28,7 @@ pebble clean            # Clean build artifacts
 Configured in `appinfo.json` under `targetPlatforms`. Currently targets **basalt** and **emery**.
 
 - **Basalt**: 144x168 color display (Pebble Time) — fully working
-- **Emery**: 200x228 color display (Pebble Time 2) — needs layout adaptation
+- **Emery**: 200x228 color display (Pebble Time 2) — enhanced layout with HR display
 
 Note: `package.json` lists all platforms (aplite, basalt, chalk, diorite, emery, flint) but `appinfo.json` is the authoritative config for SDK 4.x builds.
 
@@ -36,28 +36,23 @@ Note: `package.json` lists all platforms (aplite, basalt, chalk, diorite, emery,
 
 The entire watchface is a single C file: `src/c/main.c`. There are no resources (fonts/images) — all rendering uses system fonts and procedural drawing.
 
-### Layout Structure (hardcoded for 144x168 Basalt)
+### Layout System
 
-The layout uses absolute pixel coordinates defined as macros:
+Layout is computed at runtime from screen bounds via `compute_layout(GRect bounds)` in a `Layout` struct. All positions, box sizes, and curve dimensions derive from `bounds.size.w` and `bounds.size.h` using proportional scaling from Basalt (144x168) as the reference.
 
-- **Row 1 (y=6)**: Date box (left) + Battery box (right), each 66px wide
-- **Time display (y=32)**: Centered, using ROBOTO_BOLD_SUBSET_49
-- **Row 2 (y=90)**: Sleep box (left) + Steps box (right), each 66px wide
-- **Bell curve (y=120)**: 100px wide curve at x=22, showing step distribution
+- **Width threshold (`w > 144`)** controls `is_large` (bigger boxes/fonts) and `show_hr` (heart rate display)
+- **Emery enhancements**: taller info boxes (32px vs 26), GOTHIC_24_BOLD labels (vs 18), taller bell curve, HR flanking time
+- **HR layers**: created conditionally; resting HR left of time, current HR right of time
 
 ### Key Design Patterns
 
-- **Theme system**: `Theme` struct with colors for bg, text, accent, border, fill_steps, line_sleep, axis_dim. Auto-switches dark/light at configurable hours (7am–8pm).
+- **Theme system**: `Theme` struct with colors for bg, text, accent, border, fill_steps, line_sleep, axis_dim, hr. Auto-switches dark/light at configurable hours (7am–8pm). HR colors: GColorRed (dark), GColorDarkCandyAppleRed (light).
 - **Stats visualization**: Steps shown as filled area under a precomputed bell curve (`s_curve_points[]` lookup table, 100 entries). Sleep shown as a vertical indicator line protruding above the curve.
 - **Z-score mapping**: `map_z_score()` converts health values to pixel positions on the curve relative to configurable mean/SD constants.
 - **Health updates**: Polled every 30 minutes via tick handler, guarded by `PBL_HEALTH`.
 
-## Emery Adaptation Notes
+## Platform Notes
 
-All layout values are hardcoded `#define` macros and `GRect()` literals for the 144x168 Basalt screen. To support Emery (200x228), these need to scale or use `PBL_IF_RECT_ELSE` / platform detection. Key areas:
-
-- Box positions and widths (`DATE_RECT`, `BATT_RECT`, `SLEEP_RECT`, `STEP_RECT`)
-- Time layer position and size (`GRect(0, 32, bounds.size.w, 54)`)
-- Text layer positions (date, battery, sleep, step labels)
-- Bell curve dimensions and position (`CURVE_WIDTH`, `CURVE_HEIGHT`, `CURVE_X`, `CURVE_Y`)
-- Consider using `bounds.size.w` and `bounds.size.h` for proportional layout instead of absolute values
+- **Basalt** (144x168): Reference platform. Compact layout, GOTHIC_18_BOLD labels, no HR display.
+- **Emery** (200x228): Enhanced layout triggered by `w > 144`. Taller boxes, GOTHIC_24_BOLD labels, heart rate flanking time, taller bell curve. HR read via `health_service_peek_current_value()` with accessibility guards.
+- **Bell curve scaling**: The 100-point LUT (`s_curve_points[]`) is fixed. Drawing scales via integer interpolation: `lut_i = (pixel * 100) / curve_width`. Heights scale by `(point * curve_h) / 30`.

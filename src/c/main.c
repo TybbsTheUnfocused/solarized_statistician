@@ -6,7 +6,7 @@
 
 // Stats Settings
 #define STEPS_MEAN 7500
-#define STEPS_SD 2500 
+#define STEPS_SD 2500
 #define SLEEP_MEAN_SEC 27000 // 7.5 Hours
 #define SLEEP_SD_SEC 5400    // 1.5 Hours
 
@@ -16,9 +16,10 @@ typedef struct {
   GColor text;
   GColor accent;
   GColor border;
-  GColor fill_steps; 
-  GColor line_sleep; 
-  GColor axis_dim;   
+  GColor fill_steps;
+  GColor line_sleep;
+  GColor axis_dim;
+  GColor hr;
 } Theme;
 
 static Theme s_theme;
@@ -26,21 +27,23 @@ static bool s_is_dark_mode = true;
 
 static void update_theme_colors() {
   if (s_is_dark_mode) {
-    s_theme.bg = GColorOxfordBlue;       
-    s_theme.text = GColorWhite;           
-    s_theme.accent = GColorCyan;          
+    s_theme.bg = GColorOxfordBlue;
+    s_theme.text = GColorWhite;
+    s_theme.accent = GColorCyan;
     s_theme.border = GColorCyan;
-    s_theme.fill_steps = GColorChromeYellow; 
-    s_theme.line_sleep = GColorMagenta;     
-    s_theme.axis_dim = GColorDarkGray;      
+    s_theme.fill_steps = GColorChromeYellow;
+    s_theme.line_sleep = GColorMagenta;
+    s_theme.axis_dim = GColorDarkGray;
+    s_theme.hr = GColorRed;
   } else {
-    s_theme.bg = GColorWhite;             
-    s_theme.text = GColorOxfordBlue;      
+    s_theme.bg = GColorWhite;
+    s_theme.text = GColorOxfordBlue;
     s_theme.accent = GColorTiffanyBlue;
     s_theme.border = GColorOxfordBlue;
-    s_theme.fill_steps = GColorOrange;    
-    s_theme.line_sleep = GColorPurple; 
-    s_theme.axis_dim = GColorLightGray;   
+    s_theme.fill_steps = GColorOrange;
+    s_theme.line_sleep = GColorPurple;
+    s_theme.axis_dim = GColorLightGray;
+    s_theme.hr = GColorDarkCandyAppleRed;
   }
 }
 
@@ -51,12 +54,18 @@ static TextLayer *s_date_layer;
 static TextLayer *s_bat_layer;
 static TextLayer *s_sleep_label;
 static TextLayer *s_step_label;
+static TextLayer *s_hr_resting_label;
+static TextLayer *s_hr_current_label;
 
 static int s_step_count = 0;
 static int s_sleep_seconds = 0;
 static char s_bat_buffer[8];
 static char s_sleep_text[16];
 static char s_step_text[16];
+static int s_hr_resting = 0;
+static int s_hr_current = 0;
+static char s_hr_resting_text[8];
+static char s_hr_current_text[8];
 
 // --- Layout (computed from screen bounds in window_load) ---
 #define BOX_RADIUS 4
@@ -79,6 +88,10 @@ typedef struct {
   int curve_y;
   int curve_w;
   int curve_h;
+  GRect hr_resting_frame;
+  GRect hr_current_frame;
+  bool show_hr;
+  bool is_large;
 } Layout;
 
 static Layout s_layout;
@@ -86,29 +99,44 @@ static Layout s_layout;
 static void compute_layout(GRect bounds) {
   int w = bounds.size.w;
   int h = bounds.size.h;
+  bool large = w > 144;
+  s_layout.is_large = large;
+  s_layout.show_hr = large;
+
+  int box_h = large ? 32 : 26;
+  int text_h = large ? 28 : 24;
   int box_w = (w - 2 * LAYOUT_MARGIN - LAYOUT_GAP) / 2;
   int right_x = LAYOUT_MARGIN + box_w + LAYOUT_GAP;
 
   int row1_y = (h * 6) / 168;
-  s_layout.date_box  = GRect(LAYOUT_MARGIN, row1_y, box_w, 26);
-  s_layout.batt_box  = GRect(right_x, row1_y, box_w, 26);
+  s_layout.date_box  = GRect(LAYOUT_MARGIN, row1_y, box_w, box_h);
+  s_layout.batt_box  = GRect(right_x, row1_y, box_w, box_h);
 
   int time_y = (h * 32) / 168;
   s_layout.time_frame = GRect(0, time_y, w, 54);
 
-  int row2_y = (h * 90) / 168;
-  s_layout.sleep_box = GRect(LAYOUT_MARGIN, row2_y, box_w, 26);
-  s_layout.step_box  = GRect(right_x, row2_y, box_w, 26);
+  int row2_y = large ? (h * 95) / 168 : (h * 90) / 168;
+  s_layout.sleep_box = GRect(LAYOUT_MARGIN, row2_y, box_w, box_h);
+  s_layout.step_box  = GRect(right_x, row2_y, box_w, box_h);
 
-  s_layout.date_frame  = GRect(LAYOUT_MARGIN, row1_y + 2, box_w, 24);
-  s_layout.batt_frame  = GRect(right_x, row1_y + 2, box_w, 24);
-  s_layout.sleep_frame = GRect(LAYOUT_MARGIN, row2_y + 2, box_w, 24);
-  s_layout.step_frame  = GRect(right_x, row2_y + 2, box_w, 24);
+  int text_inset = (box_h - text_h) / 2;
+  s_layout.date_frame  = GRect(LAYOUT_MARGIN, row1_y + text_inset, box_w, text_h);
+  s_layout.batt_frame  = GRect(right_x, row1_y + text_inset, box_w, text_h);
+  s_layout.sleep_frame = GRect(LAYOUT_MARGIN, row2_y + text_inset, box_w, text_h);
+  s_layout.step_frame  = GRect(right_x, row2_y + text_inset, box_w, text_h);
 
   s_layout.curve_w = (w * 100) / 144;
   s_layout.curve_x = (w - s_layout.curve_w) / 2;
   s_layout.curve_y = (h * 120) / 168;
-  s_layout.curve_h = (h * 34) / 168;
+  s_layout.curve_h = large ? (h * 38) / 168 : (h * 34) / 168;
+
+  if (s_layout.show_hr) {
+    int hr_w = 34;
+    int hr_h = large ? 28 : 24;
+    int hr_y = time_y + (54 - hr_h) / 2;
+    s_layout.hr_resting_frame = GRect(2, hr_y, hr_w, hr_h);
+    s_layout.hr_current_frame = GRect(w - hr_w - 2, hr_y, hr_w, hr_h);
+  }
 }
 
 static const int8_t s_curve_points[] = {
@@ -233,6 +261,10 @@ static void update_time(struct tm *tick_time) {
     text_layer_set_text_color(s_bat_layer, s_theme.text);
     text_layer_set_text_color(s_sleep_label, s_theme.line_sleep);
     text_layer_set_text_color(s_step_label, s_theme.fill_steps);
+    if (s_layout.show_hr) {
+      text_layer_set_text_color(s_hr_resting_label, s_theme.hr);
+      text_layer_set_text_color(s_hr_current_label, s_theme.hr);
+    }
     layer_mark_dirty(s_canvas_layer);
   }
 
@@ -260,19 +292,46 @@ static void update_health() {
   if (mask & HealthServiceAccessibilityMaskAvailable) {
     s_step_count = (int)health_service_sum_today(metric);
   }
-  
+
   HealthServiceAccessibilityMask sleep_mask = health_service_metric_accessible(
     HealthMetricSleepSeconds, start, end);
   if (sleep_mask & HealthServiceAccessibilityMaskAvailable) {
     s_sleep_seconds = (int)health_service_sum_today(HealthMetricSleepSeconds);
   }
-  
+
   int sleep_h_x10 = (s_sleep_seconds * 10) / 3600;
   snprintf(s_sleep_text, sizeof(s_sleep_text), "%d.%dh", sleep_h_x10 / 10, sleep_h_x10 % 10);
   text_layer_set_text(s_sleep_label, s_sleep_text);
 
   snprintf(s_step_text, sizeof(s_step_text), "%d", s_step_count);
   text_layer_set_text(s_step_label, s_step_text);
+
+  if (s_layout.show_hr) {
+    HealthServiceAccessibilityMask hr_mask = health_service_metric_accessible(
+      HealthMetricHeartRateBPM, start, end);
+    if (hr_mask & HealthServiceAccessibilityMaskAvailable) {
+      s_hr_current = (int)health_service_peek_current_value(HealthMetricHeartRateBPM);
+    }
+    HealthServiceAccessibilityMask rhr_mask = health_service_metric_accessible(
+      HealthMetricRestingHeartRateBPM, start, end);
+    if (rhr_mask & HealthServiceAccessibilityMaskAvailable) {
+      s_hr_resting = (int)health_service_peek_current_value(HealthMetricRestingHeartRateBPM);
+    }
+
+    if (s_hr_resting > 0) {
+      snprintf(s_hr_resting_text, sizeof(s_hr_resting_text), "R%d", s_hr_resting);
+    } else {
+      snprintf(s_hr_resting_text, sizeof(s_hr_resting_text), "R--");
+    }
+    text_layer_set_text(s_hr_resting_label, s_hr_resting_text);
+
+    if (s_hr_current > 0) {
+      snprintf(s_hr_current_text, sizeof(s_hr_current_text), "%d", s_hr_current);
+    } else {
+      snprintf(s_hr_current_text, sizeof(s_hr_current_text), "--");
+    }
+    text_layer_set_text(s_hr_current_label, s_hr_current_text);
+  }
 
   layer_mark_dirty(s_canvas_layer);
 #endif
@@ -292,6 +351,9 @@ static void window_load(Window *window) {
   compute_layout(bounds);
   window_set_background_color(window, s_theme.bg);
 
+  const char *info_font_key = s_layout.is_large ?
+    FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD;
+
   // 1. Canvas
   s_canvas_layer = layer_create(bounds);
   layer_set_update_proc(s_canvas_layer, canvas_update_proc);
@@ -309,7 +371,7 @@ static void window_load(Window *window) {
   s_date_layer = text_layer_create(s_layout.date_frame);
   text_layer_set_background_color(s_date_layer, GColorClear);
   text_layer_set_text_color(s_date_layer, s_theme.accent);
-  text_layer_set_font(s_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_font(s_date_layer, fonts_get_system_font(info_font_key));
   text_layer_set_text_alignment(s_date_layer, GTextAlignmentCenter);
   layer_add_child(root, text_layer_get_layer(s_date_layer));
 
@@ -317,7 +379,7 @@ static void window_load(Window *window) {
   s_bat_layer = text_layer_create(s_layout.batt_frame);
   text_layer_set_background_color(s_bat_layer, GColorClear);
   text_layer_set_text_color(s_bat_layer, s_theme.text);
-  text_layer_set_font(s_bat_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_font(s_bat_layer, fonts_get_system_font(info_font_key));
   text_layer_set_text_alignment(s_bat_layer, GTextAlignmentCenter);
   layer_add_child(root, text_layer_get_layer(s_bat_layer));
 
@@ -326,7 +388,7 @@ static void window_load(Window *window) {
   s_sleep_label = text_layer_create(s_layout.sleep_frame);
   text_layer_set_background_color(s_sleep_label, GColorClear);
   text_layer_set_text_color(s_sleep_label, s_theme.line_sleep);
-  text_layer_set_font(s_sleep_label, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_font(s_sleep_label, fonts_get_system_font(info_font_key));
   text_layer_set_text_alignment(s_sleep_label, GTextAlignmentCenter);
   layer_add_child(root, text_layer_get_layer(s_sleep_label));
 
@@ -334,9 +396,26 @@ static void window_load(Window *window) {
   s_step_label = text_layer_create(s_layout.step_frame);
   text_layer_set_background_color(s_step_label, GColorClear);
   text_layer_set_text_color(s_step_label, s_theme.fill_steps);
-  text_layer_set_font(s_step_label, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+  text_layer_set_font(s_step_label, fonts_get_system_font(info_font_key));
   text_layer_set_text_alignment(s_step_label, GTextAlignmentCenter);
   layer_add_child(root, text_layer_get_layer(s_step_label));
+
+  // 6. Heart Rate (Emery+ only)
+  if (s_layout.show_hr) {
+    s_hr_resting_label = text_layer_create(s_layout.hr_resting_frame);
+    text_layer_set_background_color(s_hr_resting_label, GColorClear);
+    text_layer_set_text_color(s_hr_resting_label, s_theme.hr);
+    text_layer_set_font(s_hr_resting_label, fonts_get_system_font(info_font_key));
+    text_layer_set_text_alignment(s_hr_resting_label, GTextAlignmentCenter);
+    layer_add_child(root, text_layer_get_layer(s_hr_resting_label));
+
+    s_hr_current_label = text_layer_create(s_layout.hr_current_frame);
+    text_layer_set_background_color(s_hr_current_label, GColorClear);
+    text_layer_set_text_color(s_hr_current_label, s_theme.hr);
+    text_layer_set_font(s_hr_current_label, fonts_get_system_font(info_font_key));
+    text_layer_set_text_alignment(s_hr_current_label, GTextAlignmentCenter);
+    layer_add_child(root, text_layer_get_layer(s_hr_current_label));
+  }
 }
 
 static void window_unload(Window *window) {
@@ -345,6 +424,8 @@ static void window_unload(Window *window) {
   text_layer_destroy(s_bat_layer);
   text_layer_destroy(s_sleep_label);
   text_layer_destroy(s_step_label);
+  if (s_hr_resting_label) text_layer_destroy(s_hr_resting_label);
+  if (s_hr_current_label) text_layer_destroy(s_hr_current_label);
   layer_destroy(s_canvas_layer);
 }
 
@@ -358,7 +439,7 @@ static void init() {
 
   tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
   battery_state_service_subscribe(update_battery);
-  
+
   update_time(NULL);
   update_battery(battery_state_service_peek());
   update_health();

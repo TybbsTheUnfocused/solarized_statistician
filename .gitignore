@@ -4,3 +4,6 @@ build/
 *.pyc
 .DS_Store
 worker_src/
+.docs/
+.docs
+.docs/*
